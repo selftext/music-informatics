@@ -38,6 +38,17 @@ midi_notes$pitch_class <- gsub(",|'", "", toupper(midi_notes$notename))
 (pitch_class_freq <- table(midi_notes$pitch_class))
 (pitch_class_prop <- round(prop.table(table(midi_notes$pitch_class)), 4))
 
+# tempo exploration
+get_bpm <- function(msecs) {
+  msecs_per_min <- 6e7
+  msecs_per_min / msecs
+}
+
+midi$bpm <- NA
+midi[midi$event == "Set Tempo", ] <- midi %>%
+  filter(event == "Set Tempo") %>%
+  mutate(bpm = get_bpm(as.numeric(parameterMetaSystem)))
+
 # need functions for:
 # determining whether a note is quarter, half, whole, etc.
 # binning notes into measures
