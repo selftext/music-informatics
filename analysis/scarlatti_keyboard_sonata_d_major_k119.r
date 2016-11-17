@@ -9,7 +9,7 @@ midi <- readMidi(paste0(midi_directory, midi_file))
 midi_notes <- getMidiNotes(midi)
 
 #--------------------------------------------------------------------
-# exploration
+# pitch exploration
 
 # highest pitch
 midi_notes[which.max(midi_notes$note), ]
@@ -38,16 +38,53 @@ midi_notes$pitch_class <- gsub(",|'", "", toupper(midi_notes$notename))
 (pitch_class_freq <- table(midi_notes$pitch_class))
 (pitch_class_prop <- round(prop.table(table(midi_notes$pitch_class)), 4))
 
+
+#--------------------------------------------------------------------
 # tempo exploration
-get_bpm <- function(msecs) {
-  msecs_per_min <- 6e7
-  msecs_per_min / msecs
+
+get_bpm <- function(usecs_per_quarter_note) {
+  usecs_per_min <- 6e7
+  usecs_per_min / usecs_per_quarter_note
 }
 
 midi$bpm <- NA
 midi[midi$event == "Set Tempo", ] <- midi %>%
   filter(event == "Set Tempo") %>%
   mutate(bpm = get_bpm(as.numeric(parameterMetaSystem)))
+
+# let's check the time signatures
+# the last part should look like "8 1/32 notes / 24 clocks"
+filter(midi, event == "Time Signature")[, c(1,2,7)]
+
+# extract just the time signature data
+midi_timing <- midi %>%
+  filter(event == "Time Signature") %>%
+  mutate(timing = strsplit(parameterMetaSystem, ","))
+
+# messy, but not sure I even need a function for this
+# unless it changes throughout a piece
+clocks_per_quarter_note <- lapply(midi_timing$timing, function(t) {
+  clocks <- strsplit(t[[3]], " / ")[[1]][2]
+  n_clocks <- as.integer(gsub(" clocks", "", clocks))
+  data.frame(event = "Time Signature",
+             clocks_per_quarter_note = n_clocks,
+             stringsAsFactors = FALSE)
+}) %>% do.call("rbind", .)
+
+# extract numerator and denominator of time signature
+time_signatures <- lapply(midi_timing$timing, function(t) {
+  values <- strsplit(t[[1]], "/")
+  note_value <- as.integer(values[[1]][2])
+  note_values_per_bar <- as.integer(values[[1]][1])
+  data.frame(event = "Time Signature",
+             note_value,
+             note_values_per_bar,
+             stringsAsFactors = FALSE)
+}) %>% do.call("rbind", .)
+
+midi <- midi %>%
+  left_join(clocks_per_quarter_note, by = "event") %>%
+  left_join(time_signatures, by = "event")
 
 # need functions for:
 # determining whether a note is quarter, half, whole, etc.
