@@ -56,35 +56,37 @@ midi[midi$event == "Set Tempo", ] <- midi %>%
 # the last part should look like "8 1/32 notes / 24 clocks"
 filter(midi, event == "Time Signature")[, c(1,2,7)]
 
+# messy, but not sure I even need a function for this
+# unless it changes throughout a piece
+get_clocks_per_quarter_note <- function(t) {
+  timing <- unlist(strsplit(t, ","))
+  clocks <- strsplit(timing[3], " / ")[[1]][2]
+  as.integer(gsub(" clocks", "", clocks))
+}
+
+# extract numerator and denominator of time signature
+get_note_value <- function(t) {
+  timing <- unlist(strsplit(t, ","))
+  values <- strsplit(timing[1], "/")
+  as.integer(values[[1]][2])
+}
+
+get_note_values_ber_bar <- function(t) {
+  timing <- unlist(strsplit(t, ","))
+  values <- strsplit(timing[1], "/")
+  as.integer(values[[1]][1])
+}
+
 # extract just the time signature data
 midi_timing <- midi %>%
   filter(event == "Time Signature") %>%
-  mutate(timing = strsplit(parameterMetaSystem, ","))
-
-# messy, but not sure I even need a function for this
-# unless it changes throughout a piece
-clocks_per_quarter_note <- lapply(midi_timing$timing, function(t) {
-  clocks <- strsplit(t[[3]], " / ")[[1]][2]
-  n_clocks <- as.integer(gsub(" clocks", "", clocks))
-  data.frame(event = "Time Signature",
-             clocks_per_quarter_note = n_clocks,
-             stringsAsFactors = FALSE)
-}) %>% do.call("rbind", .)
-
-# extract numerator and denominator of time signature
-time_signatures <- lapply(midi_timing$timing, function(t) {
-  values <- strsplit(t[[1]], "/")
-  note_value <- as.integer(values[[1]][2])
-  note_values_per_bar <- as.integer(values[[1]][1])
-  data.frame(event = "Time Signature",
-             note_value,
-             note_values_per_bar,
-             stringsAsFactors = FALSE)
-}) %>% do.call("rbind", .)
+  mutate(clocks_per_quarter_note = get_clocks_per_quarter_note(parameterMetaSystem),
+         note_value = get_note_value(parameterMetaSystem),
+         note_values_per_bar = get_note_values_ber_bar(parameterMetaSystem))
 
 midi <- midi %>%
-  left_join(clocks_per_quarter_note, by = "event") %>%
-  left_join(time_signatures, by = "event")
+  left_join(midi_timing) %>%
+  arrange(time)
 
 # need functions for:
 # determining whether a note is quarter, half, whole, etc.
