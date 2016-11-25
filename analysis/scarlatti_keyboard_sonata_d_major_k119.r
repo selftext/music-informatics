@@ -1,3 +1,5 @@
+library(zoo)
+
 source("~/projects/music-informatics/etc/setup.r")
 midi_directory <- "~/projects/music-informatics/midi/"
 
@@ -42,15 +44,8 @@ midi_notes$pitch_class <- gsub(",|'", "", toupper(midi_notes$notename))
 #--------------------------------------------------------------------
 # tempo exploration
 
-get_bpm <- function(usecs_per_quarter_note) {
-  usecs_per_min <- 6e7
-  usecs_per_min / usecs_per_quarter_note
-}
-
-midi$bpm <- NA
-midi[midi$event == "Set Tempo", ] <- midi %>%
-  filter(event == "Set Tempo") %>%
-  mutate(bpm = get_bpm(as.numeric(parameterMetaSystem)))
+# note: if there are no "Set Tempo" or "Time Signature" events,
+# default the usecs_per_quarter_note to 500000 and the time signature to 4/4
 
 # let's check the time signatures
 # the last part should look like "8 1/32 notes / 24 clocks"
@@ -80,6 +75,7 @@ get_note_values_ber_bar <- function(t) {
 # extract just the time signature data
 midi_timing <- midi %>%
   filter(event == "Time Signature") %>%
+  group_by(time) %>%
   mutate(clocks_per_quarter_note = get_clocks_per_quarter_note(parameterMetaSystem),
          note_value = get_note_value(parameterMetaSystem),
          note_values_per_bar = get_note_values_ber_bar(parameterMetaSystem))
@@ -88,6 +84,40 @@ midi <- midi %>%
   left_join(midi_timing) %>%
   arrange(time)
 
-# need functions for:
-# determining whether a note is quarter, half, whole, etc.
-# binning notes into measures
+midi$note_value <- na.locf(midi$note_value, na.rm = FALSE)
+midi$note_values_per_bar <- na.locf(midi$note_values_per_bar, na.rm = FALSE)
+midi$clocks_per_quarter_note <- na.locf(midi$clocks_per_quarter_note, na.rm = FALSE)
+
+# bpm
+# do I need to take into account note_value?
+# see http://www.lastrayofhope.co.uk/2009/12/23/midi-delta-time-ticks-to-seconds/
+get_bpm <- function(usecs_per_quarter_note, note_value = 4) {
+  usecs_per_min <- 6e7
+  (usecs_per_min / usecs_per_quarter_note) * (note_value / 4)
+}
+
+midi$bpm <- NA
+midi[midi$event == "Set Tempo", ] <- midi %>%
+  filter(event == "Set Tempo") %>%
+  group_by(time) %>%
+  mutate(bpm = get_bpm(as.numeric(parameterMetaSystem), note_value))
+
+midi$bpm <- na.locf(midi$bpm, na.rm = FALSE)
+
+# the first line of this midi file looks like this:
+# 4d54 6864 0000 0006 0001 0002 0400 4d54
+# the word 0400 refers to ticks per quater-note
+# in this case, there are 1024 ticks per quarter-note
+ticks_per_quarter_note <- 1024
+ticks_per_eighth_note <- ticks_per_quarter_note / 2
+
+midi$quater_notes_per_bar <- (midi$note_values_per_bar / midi$note_value) * 4
+midi$ticks_per_bar <- midi$quater_notes_per_bar * ticks_per_quarter_note
+
+m <- midi_notes %>%
+  inner_join(midi, by = c("time", "channel")) %>%
+  distinct(time, length, note, notename, velocity,
+           pitch_class, bpm, ticks_per_bar)
+
+# note: this currently only works if the time signature doesn't change
+m$bar <- (m$time %/% m$ticks_per_bar) + 1
